@@ -2,4 +2,3 @@
 __pycache__/
 data/
 *.parquet
-submission.csv
