@@ -1,0 +1,7 @@
+numpy
+pandas
+pyarrow==17.0.1
+scipy
+scikit-learn
+plotly
+tqdm

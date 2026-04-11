@@ -1,0 +1,85 @@
+Strategy Description
+
+Core Idea
+A multi-factor mean-reversion strategy combining a stable subset of 18 technical features
+with three signal enhancement layers: portfolio-level temporal smoothing, volatility-group
+neutralization, and true sleeve concentration. The design goal is to improve predictive
+quality without adding fragile adaptive logic: retain only features with useful standalone
+signal, remove weak or redundant indicators, neutralize simple volatility exposure, and
+allocate capital only to the strongest cross-sectional opportunities.
+
+Signal Construction
+1. For each of 18 selected features, shift by 1 day (no lookahead).
+2. Cross-sectional rank across ALL stocks (not just universe) on each day.
+3. EWMA smoothing (span=3) on the ranked values to reduce noise.
+4. Demean cross-sectionally and normalize to unit sum-of-abs.
+5. Combine with fixed IC_IR weights (mean IC / std IC per feature, estimated on the
+   available training data only).
+
+Feature Selection and Redundancy Control
+- The starting point was the full technical-feature set.
+- Weak and highly redundant indicators were removed in conservative steps rather than by
+  fitting a complex meta-model.
+- `know_sure_thing`, `trix`, and `macd` were removed because they had weak standalone
+  predictive quality and were heavily correlated with stronger trend features.
+- A correlation map was built on the transformed feature signals that actually feed the
+  portfolio, not on raw indicator values. Under this map, `williams_r` was the remaining
+  true duplicate and was removed because it effectively duplicated
+  `stochastic_oscillator`.
+- Broader high-correlation families such as
+  `stochastic_oscillator` / `relative_strength_index` / `commodity_channel_index` were also
+  tested for more aggressive pruning, but those reductions weakened the 2015-2019 block.
+  They are therefore kept, since they appear correlated but still additive in the final
+  portfolio construction.
+
+Top 5 retained weights
+- trend_5_20:                     -0.1023
+- accumulation_distribution_index: -0.0990
+- trend_20_60:                    -0.0944
+- average_true_range:             -0.0830
+- trend_1_3:                      -0.0803
+
+Enhancement Layer 1: Portfolio EWMA (span=5)
+After combining all feature signals, a portfolio-level EWMA with span=5 is applied.
+This smooths day-to-day noise while preserving slower-moving cross-sectional structure.
+
+Enhancement Layer 2: Volatility-Group Neutralization (10 groups)
+Stocks are sorted into 10 groups by their `volatility_20` percentile rank. Within each
+group, the signal is demeaned. This removes broad volatility exposure and forces the
+strategy to earn returns within each volatility bucket rather than from a simple bias
+toward high- or low-volatility stocks.
+
+Enhancement Layer 3: True Sleeve Concentration (top/bottom 12%)
+After vol-neutralization, only stocks in the top 6% and bottom 6% of signal strength are
+kept. Long and short sleeves are then normalized separately to +0.5 and -0.5 instead of
+demeaning across the whole universe. This preserves sparsity and prevents tiny residual
+weights from leaking back into low-conviction names.
+
+NaN Handling
+Early years contain materially more NaN values than later years. Ranking naturally ignores
+NaN values. EWMA with `min_periods=1` propagates through sparse early data, and universe
+filtering ensures the strategy only trades eligible stocks.
+
+Portfolio Construction
+- Dollar neutral: long sleeve sums to +0.5 and short sleeve sums to -0.5.
+- Unit capital: sum(|w|) = 1.0.
+- Max weight: |w| <= 0.1 per stock, enforced via iterative clipping and sleeve rescaling.
+- Effective diversification: roughly 120 names on average, concentrated only in the
+  highest-conviction signals.
+
+Iterative/Vectorized Match
+Both implementations match very closely (PnL correlation > 0.9999). Signal construction
+ranks ALL stocks and applies portfolio EWMA on ALL stocks before universe filtering, after
+which both implementations use the same sparse sleeve construction.
+
+Performance (2005-2019 Training Period)
+- Overall: Gross Sharpe 2.441, Net Sharpe 2.247, Turnover 52.0%
+- 2005-2009: Net Sharpe 2.839
+- 2010-2014: Net Sharpe 2.172
+- 2015-2019: Net Sharpe 1.692
+
+The final design is intentionally conservative. Improvements come mainly from removing
+weak or redundant signals and fixing the portfolio construction so that only high-conviction
+names receive capital, rather than from using fast regime switches or day-to-day feedback
+from realized PnL. That keeps the strategy simpler, more interpretable, and more likely to
+generalize into the hidden test period.
